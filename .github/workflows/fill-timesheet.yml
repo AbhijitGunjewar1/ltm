@@ -1,0 +1,58 @@
+name: Fill Timesheet (every Friday)
+
+on:
+  schedule:
+    # Every Friday at 18:30 UTC (end of business day IST ~midnight)
+    - cron: "30 13 * * 5"
+  workflow_dispatch:
+    inputs:
+      headless:
+        description: "Run headless? (true/false)"
+        required: false
+        default: "true"
+
+jobs:
+  fill-timesheet:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install Playwright & Chromium
+        run: |
+          pip install playwright
+          playwright install chromium
+          playwright install-deps chromium
+
+      - name: Fill timesheet
+        env:
+          ITIME_USERNAME: ${{ secrets.ITIME_USERNAME }}
+          ITIME_PASSWORD: ${{ secrets.ITIME_PASSWORD }}
+          ITIME_PROJECT_CODE: ${{ secrets.ITIME_PROJECT_CODE }}
+          HEADLESS: ${{ github.event.inputs.headless || 'true' }}
+          SCREENSHOTS_DIR: screenshots
+        run: python fill_timesheet.py
+
+      - name: Upload screenshots on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: timesheet-screenshots
+          path: screenshots/
+          retention-days: 7
+
+      - name: Upload screenshots on success
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: timesheet-screenshots
+          path: screenshots/
+          retention-days: 3
