@@ -2,8 +2,8 @@ name: Auto-close old Jira tasks
 
 on:
   schedule:
-    # Runs every day at 09:00 UTC
-    - cron: "0 9 * * *"
+    # Runs every Friday at 09:00 UTC
+    - cron: "0 9 * * 5"
   workflow_dispatch:
     inputs:
       dry_run:
