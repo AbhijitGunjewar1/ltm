@@ -24,11 +24,10 @@ jobs:
           python-version: "3.12"
 
       - name: Install Python dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r timesheet/requirements.txt
 
       - name: Install Playwright & Chromium
         run: |
-          pip install playwright
           playwright install chromium
           playwright install-deps chromium
 
@@ -38,15 +37,15 @@ jobs:
           ITIME_PASSWORD: ${{ secrets.ITIME_PASSWORD }}
           ITIME_PROJECT_CODE: ${{ secrets.ITIME_PROJECT_CODE }}
           HEADLESS: ${{ github.event.inputs.headless || 'true' }}
-          SCREENSHOTS_DIR: screenshots
-        run: python fill_timesheet.py
+          SCREENSHOTS_DIR: timesheet/screenshots
+        run: python timesheet/fill_timesheet.py
 
       - name: Upload screenshots on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: timesheet-screenshots
-          path: screenshots/
+          path: timesheet/screenshots/
           retention-days: 7
 
       - name: Upload screenshots on success
@@ -54,5 +53,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: timesheet-screenshots
-          path: screenshots/
+          path: timesheet/screenshots/
           retention-days: 3
