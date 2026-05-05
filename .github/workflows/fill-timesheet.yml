@@ -2,8 +2,8 @@ name: Fill Timesheet (daily 11 AM IST)
 
 on:
   schedule:
-    # 05:30 UTC = 11:00 AM IST, runs every day
-    - cron: "30 5 * * *"
+    # 05:30 UTC = 11:00 AM IST, runs every day Mon–Fri
+    - cron: "30 5 * * 1-5"
 
   # Ad-hoc / manual trigger
   workflow_dispatch:
@@ -40,8 +40,7 @@ jobs:
 
       - name: Fill timesheet
         env:
-          ITIME_USERNAME:     ${{ secrets.ITIME_USERNAME }}
-          ITIME_PASSWORD:     ${{ secrets.ITIME_PASSWORD }}
+          ITIME_SESSION:      ${{ secrets.ITIME_SESSION }}
           ITIME_PROJECT_CODE: ${{ secrets.ITIME_PROJECT_CODE }}
           TARGET_DATE:        ${{ github.event.inputs.target_date || '' }}
           HEADLESS:           ${{ github.event.inputs.headless || 'true' }}
