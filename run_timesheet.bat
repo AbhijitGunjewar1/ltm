@@ -7,17 +7,15 @@ echo ============================================================
 echo.
 
 REM ── ITIME_SESSION ────────────────────────────────────────────
-REM Read from timesheet\session.txt if env var not already set
-if "%ITIME_SESSION%"=="" (
-    if exist "timesheet\session.txt" (
-        set /p ITIME_SESSION=<timesheet\session.txt
-    )
-)
-if "%ITIME_SESSION%"=="" (
-    echo ERROR: ITIME_SESSION not found.
+REM Session is read from timesheet\session.txt by the Python script.
+REM This avoids the Windows env var size limit (~1023 chars).
+if not exist "timesheet\session.txt" (
+    echo ERROR: timesheet\session.txt not found.
     echo.
-    echo Create  timesheet\session.txt  and paste your base64 session value into it.
-    echo Run  python timesheet\save_session.py  to generate it.
+    echo 1. Run:  python timesheet\save_session.py
+    echo 2. Copy the printed base64 value into a file named:
+    echo      timesheet\session.txt
+    echo.
     pause & exit /b 1
 )
 

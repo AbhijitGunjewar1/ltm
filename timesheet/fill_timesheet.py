@@ -10,8 +10,10 @@ Steps executed (for TARGET_DATE, default = yesterday):
   5. Save the timesheet
   6. Open Regularization, fill 9 hours with comment 'wfh' and Save
 
-Required env vars:
+Required env vars (one of):
   ITIME_SESSION       - base64-encoded auth_state.json (from save_session.py)
+  ITIME_SESSION_FILE  - path to a file containing the base64 value (avoids Windows env var size limits)
+                        defaults to timesheet/session.txt if neither env var is set
 
 Optional env vars:
   TARGET_DATE         - date to fill in YYYY-MM-DD (default: yesterday)
@@ -28,7 +30,19 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 
 # ── Config ────────────────────────────────────────────────────────────────────
-SESSION_B64     = os.environ["ITIME_SESSION"]
+def _load_session() -> str:
+    if os.environ.get("ITIME_SESSION"):
+        return os.environ["ITIME_SESSION"]
+    session_file = Path(os.environ.get("ITIME_SESSION_FILE", "timesheet/session.txt"))
+    if session_file.exists():
+        return session_file.read_text(encoding="utf-8").strip()
+    raise RuntimeError(
+        "Session not found. Either set ITIME_SESSION env var, "
+        "set ITIME_SESSION_FILE to your session file path, "
+        "or place the base64 value in timesheet/session.txt"
+    )
+
+SESSION_B64 = _load_session()
 HEADLESS        = os.environ.get("HEADLESS", "true").lower() != "false"
 SCREENSHOTS_DIR = Path(os.environ.get("SCREENSHOTS_DIR", "timesheet/screenshots"))
 SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
