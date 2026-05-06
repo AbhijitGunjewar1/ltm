@@ -168,11 +168,26 @@ def go_back_weeks(page, weeks: int, label: str):
         page.wait_for_timeout(1_000)
 
 
+# ── Wait for app to finish loading ───────────────────────────────────────────
+def wait_for_app(page):
+    """Wait until the LTM loading spinner is gone and content is visible."""
+    print("  Waiting for app to load...")
+    try:
+        # Wait for loading spinner to disappear
+        page.wait_for_selector(
+            "text=LOADING", state="hidden", timeout=30_000
+        )
+    except PWTimeout:
+        pass
+    # Extra buffer for Angular to render
+    page.wait_for_timeout(3_000)
+
+
 # ── Step 1 & 2: Navigate and identify yesterday ───────────────────────────────
 def step_navigate(page):
     print(f"\nStep 1 — Navigate to Timesheet page")
     page.goto(TIMESHEET_URL, wait_until="networkidle")
-    page.wait_for_timeout(2_000)
+    wait_for_app(page)
     shot(page, "01_timesheet_loaded")
     assert_logged_in(page)
 
@@ -228,8 +243,8 @@ def step_regularize(page):
 
     if not opened:
         page.goto(REGULARIZE_URL, wait_until="networkidle")
-        page.wait_for_timeout(2_000)
 
+    wait_for_app(page)
     shot(page, "05_regularization_open")
 
     weeks_back = (date.today() - TARGET_DATE).days // 7
