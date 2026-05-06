@@ -1,0 +1,54 @@
+name: Fill Timesheet (daily 11 AM IST)
+
+on:
+  schedule:
+    # 05:30 UTC = 11:00 AM IST, Mon–Fri
+    - cron: "30 5 * * 1-5"
+
+  workflow_dispatch:
+    inputs:
+      target_date:
+        description: "Date to fill (YYYY-MM-DD). Leave blank for yesterday."
+        required: false
+        default: ""
+      headless:
+        description: "Run headless? (true/false)"
+        required: false
+        default: "true"
+
+jobs:
+  fill-timesheet:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r timesheet/requirements.txt
+
+      - name: Install Playwright browser
+        run: |
+          playwright install chromium
+          playwright install-deps chromium
+
+      - name: Fill timesheet
+        env:
+          ITIME_SESSION:   ${{ secrets.ITIME_SESSION }}
+          TARGET_DATE:     ${{ github.event.inputs.target_date || '' }}
+          HEADLESS:        ${{ github.event.inputs.headless || 'true' }}
+          SCREENSHOTS_DIR: timesheet/screenshots
+        run: python timesheet/fill_timesheet.py
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: timesheet-screenshots-${{ github.run_id }}
+          path: timesheet/screenshots/
+          retention-days: 7
