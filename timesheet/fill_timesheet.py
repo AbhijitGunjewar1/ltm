@@ -8,12 +8,12 @@ Steps executed (for TARGET_DATE, default = yesterday):
   3. Fill 8 hours for the project entry
   4. Fill 1 hour for the non-project entry
   5. Save the timesheet
-  6. Open Regularization, fill 9 hours with comment 'wfh' and Save
+  6. Click Regularize, fill 9 hours with comment 'wfh' and Save
 
 Required env vars (one of):
   ITIME_SESSION       - base64-encoded auth_state.json (from save_session.py)
-  ITIME_SESSION_FILE  - path to a file containing the base64 value (avoids Windows env var size limits)
-                        defaults to timesheet/session.txt if neither env var is set
+  ITIME_SESSION_FILE  - path to a file containing the base64 value
+                        defaults to timesheet/session.txt if neither is set
 
 Optional env vars:
   TARGET_DATE         - date to fill in YYYY-MM-DD (default: yesterday)
@@ -43,7 +43,7 @@ def _load_session() -> str:
         "or place the base64 value in timesheet/session.txt"
     )
 
-SESSION_B64 = _load_session()
+SESSION_B64     = _load_session()
 HEADLESS        = os.environ.get("HEADLESS", "true").lower() != "false"
 SCREENSHOTS_DIR = Path(os.environ.get("SCREENSHOTS_DIR", "timesheet/screenshots"))
 SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -51,10 +51,9 @@ SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
 _raw_date   = os.environ.get("TARGET_DATE", "")
 TARGET_DATE = date.fromisoformat(_raw_date) if _raw_date else date.today() - timedelta(days=1)
 
-TIMESHEET_URL   = "https://itime.ltimindtree.com/#/Timesheet"
-REGULARIZE_URL  = "https://itime.ltimindtree.com/#/Regularization"
-TIMEOUT         = 30_000
-DAY_NAMES       = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+TIMESHEET_URL = "https://itime.ltimindtree.com/#/Timesheet"
+TIMEOUT       = 30_000
+DAY_NAMES     = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
 
 # ── Screenshot helper ─────────────────────────────────────────────────────────
@@ -64,77 +63,28 @@ def shot(page, step: str):
     print(f"  [screenshot] {path}")
 
 
-# ── Try-click / try-fill helpers ──────────────────────────────────────────────
-def try_click(page, selectors: list[str], label: str) -> bool:
-    for sel in selectors:
-        if not sel:
-            continue
+# ── Wait for app to load ──────────────────────────────────────────────────────
+def wait_for_app(page):
+    print("  Waiting for app to load...")
+    try:
+        page.wait_for_selector("text=LOADING", state="hidden", timeout=30_000)
+    except PWTimeout:
+        pass
+    page.wait_for_timeout(3_000)
+
+
+# ── Dismiss any popup/dialog ──────────────────────────────────────────────────
+def dismiss_popup(page):
+    for sel in ["button:has-text('Ok')", "button:has-text('OK')", "button:has-text('Close')"]:
         try:
-            el = page.locator(sel).first
-            if el.is_visible(timeout=3_000):
-                el.click()
+            btn = page.locator(sel).first
+            if btn.is_visible(timeout=2_000):
+                btn.click()
                 page.wait_for_timeout(1_000)
-                print(f"  ✓ Clicked: {label}")
-                return True
+                print("  Dismissed popup.")
+                return
         except Exception:
             continue
-    print(f"  ✗ Could not click: {label}")
-    return False
-
-
-def try_fill(page, selectors: list[str], value: str, label: str) -> bool:
-    for sel in selectors:
-        if not sel:
-            continue
-        try:
-            el = page.locator(sel).first
-            if el.is_visible(timeout=3_000):
-                el.triple_click()
-                el.fill(value)
-                print(f"  ✓ Filled {value}hr → {label}")
-                return True
-        except Exception:
-            continue
-    print(f"  ✗ Could not fill: {label}")
-    return False
-
-
-def try_select(page, selectors: list[str], option: str, label: str) -> bool:
-    for sel in selectors:
-        if not sel:
-            continue
-        try:
-            el = page.locator(sel).first
-            if el.is_visible(timeout=3_000):
-                tag = el.evaluate("e => e.tagName").upper()
-                if tag == "SELECT":
-                    el.select_option(label=option)
-                else:
-                    el.click()
-                    page.wait_for_timeout(500)
-                    page.locator(
-                        f"mat-option:has-text('{option}'), "
-                        f"li:has-text('{option}'), "
-                        f"option:has-text('{option}')"
-                    ).first.click()
-                print(f"  ✓ Selected '{option}' → {label}")
-                return True
-        except Exception:
-            continue
-    print(f"  ✗ Could not select '{option}' for: {label}")
-    return False
-
-
-def save(page, context=""):
-    try_click(page, [
-        "button:has-text('Save')",
-        "input[value='Save']",
-        "button[title='Save']",
-        "#saveButton",
-        "[class*='save-btn']",
-        "button.save",
-    ], f"Save ({context})")
-    page.wait_for_timeout(2_000)
 
 
 # ── Session check ─────────────────────────────────────────────────────────────
@@ -147,43 +97,35 @@ def assert_logged_in(page):
             "to capture a fresh session and update the ITIME_SESSION secret."
         )
     except PWTimeout:
-        pass  # no login page → still authenticated
-
-
-# ── Week navigation ───────────────────────────────────────────────────────────
-def go_back_weeks(page, weeks: int, label: str):
-    if weeks <= 0:
-        return
-    prev_btns = [
-        "button[aria-label*='previous' i]",
-        "button[aria-label*='prev' i]",
-        "button.prev-week",
-        "[class*='prev-week']",
-        ".week-nav-prev",
-        "mat-icon:has-text('chevron_left')",
-    ]
-    print(f"  Navigating {weeks} week(s) back ({label})...")
-    for _ in range(weeks):
-        try_click(page, prev_btns, "previous week")
-        page.wait_for_timeout(1_000)
-
-
-# ── Wait for app to finish loading ───────────────────────────────────────────
-def wait_for_app(page):
-    """Wait until the LTM loading spinner is gone and content is visible."""
-    print("  Waiting for app to load...")
-    try:
-        # Wait for loading spinner to disappear
-        page.wait_for_selector(
-            "text=LOADING", state="hidden", timeout=30_000
-        )
-    except PWTimeout:
         pass
-    # Extra buffer for Angular to render
-    page.wait_for_timeout(3_000)
 
 
-# ── Step 1 & 2: Navigate and identify yesterday ───────────────────────────────
+# ── Column index for target date (grid is Sunday-first) ───────────────────────
+def day_column() -> int:
+    # Grid columns: Sun=2, Mon=3, Tue=4, Wed=5, Thu=6, Fri=7, Sat=8
+    # Python weekday(): Mon=0 … Sun=6
+    return (TARGET_DATE.weekday() + 1) % 7 + 2
+
+
+# ── Fill a specific input cell by row index and column ───────────────────────
+def fill_cell(page, row_nth: int, col: int, value: str, label: str) -> bool:
+    try:
+        row = page.locator("tr:has(input)").nth(row_nth)
+        cell = row.locator(f"td:nth-child({col})").first
+        inp  = cell.locator("input").first
+        if inp.is_visible(timeout=5_000):
+            inp.triple_click()
+            inp.fill(value)
+            inp.press("Tab")
+            page.wait_for_timeout(500)
+            print(f"  ✓ Filled {value}hr → {label}")
+            return True
+    except Exception as e:
+        print(f"  ✗ Could not fill {label}: {e}")
+    return False
+
+
+# ── Step 1: Navigate ──────────────────────────────────────────────────────────
 def step_navigate(page):
     print(f"\nStep 1 — Navigate to Timesheet page")
     page.goto(TIMESHEET_URL, wait_until="networkidle")
@@ -192,92 +134,122 @@ def step_navigate(page):
     assert_logged_in(page)
 
     weeks_back = (date.today() - TARGET_DATE).days // 7
-    go_back_weeks(page, weeks_back, "timesheet")
+    if weeks_back > 0:
+        print(f"  Navigating {weeks_back} week(s) back...")
+        for _ in range(weeks_back):
+            for sel in ["button[aria-label*='previous' i]", "button[aria-label*='prev' i]",
+                        ".prev-week", "[class*='prev-week']"]:
+                try:
+                    btn = page.locator(sel).first
+                    if btn.is_visible(timeout=2_000):
+                        btn.click()
+                        page.wait_for_timeout(1_500)
+                        break
+                except Exception:
+                    continue
+
     shot(page, "02_correct_week")
-
-    day_name = DAY_NAMES[TARGET_DATE.weekday()]
-    print(f"  Target date: {TARGET_DATE} ({day_name})")
+    print(f"  Target date: {TARGET_DATE} ({DAY_NAMES[TARGET_DATE.weekday()]})")
 
 
-# ── Step 3 & 4: Fill project and non-project hours ───────────────────────────
+# ── Step 2 & 3: Fill hours ────────────────────────────────────────────────────
 def step_fill_timesheet(page):
-    col = TARGET_DATE.weekday() + 2  # Mon=col2 … Sun=col8
+    col = day_column()
+    print(f"\nStep 3 — Fill 8 hours (project) at column {col}")
+    fill_cell(page, 0, col, "8", "project row")
 
-    print(f"\nStep 3 — Fill 8 hours (project)")
-    try_fill(page, [
-        f"tr:has-text('Billable') td:nth-child({col}) input",
-        f"tr:has-text('Project') td:nth-child({col}) input",
-        "tr:has-text('Billable') input[type='number']",
-        "tr:has-text('Billable') input[type='text']",
-        "[data-type='billable'] input",
-        ".project-hours input",
-    ], "8", "project hours")
-
-    print(f"\nStep 4 — Fill 1 hour (non-project)")
-    try_fill(page, [
-        f"tr:has-text('Non-Project') td:nth-child({col}) input",
-        f"tr:has-text('Non Project') td:nth-child({col}) input",
-        "tr:has-text('Non-Project') input[type='number']",
-        "tr:has-text('Non-Project') input[type='text']",
-        "[data-type='non-project'] input",
-        ".non-project-hours input",
-    ], "1", "non-project hours")
+    print(f"\nStep 4 — Fill 1 hour (non-project) at column {col}")
+    fill_cell(page, -1, col, "1", "non-project row")
 
     shot(page, "03_hours_filled")
 
     print(f"\nStep 5 — Save timesheet")
-    save(page, "timesheet")
+    page.locator("button:has-text('Save')").first.click()
+    page.wait_for_timeout(2_000)
+    dismiss_popup(page)
     shot(page, "04_timesheet_saved")
 
 
-# ── Step 5: Regularization ────────────────────────────────────────────────────
+# ── Step 4: Regularize ────────────────────────────────────────────────────────
 def step_regularize(page):
-    print(f"\nStep 6 — Open Regularization")
-    opened = try_click(page, [
-        "a:has-text('Regulariz')",
+    print(f"\nStep 6 — Open Regularize")
+
+    # The Regularize button is in the Attendance section header on the same page
+    clicked = False
+    for sel in [
+        "button:has-text('Regularize')",
+        "a:has-text('Regularize')",
+        "span:has-text('Regularize')",
+        "[class*='regularize' i]",
         "button:has-text('Regulariz')",
-        "li:has-text('Regulariz')",
-        "[href*='regulariz' i]",
-        "[class*='regulariz' i]",
-    ], "Regularization tab")
+    ]:
+        try:
+            btn = page.locator(sel).first
+            if btn.is_visible(timeout=3_000):
+                btn.click()
+                page.wait_for_timeout(2_000)
+                clicked = True
+                print("  ✓ Clicked Regularize button")
+                break
+        except Exception:
+            continue
 
-    if not opened:
-        page.goto(REGULARIZE_URL, wait_until="networkidle")
+    if not clicked:
+        print("  ✗ Could not find Regularize button")
 
-    wait_for_app(page)
-    shot(page, "05_regularization_open")
+    shot(page, "05_regularize_open")
 
-    weeks_back = (date.today() - TARGET_DATE).days // 7
-    go_back_weeks(page, weeks_back, "regularization")
-
+    # Fill hours, reason, comment in the regularization form/modal
     print("  Filling 9 hours WFH...")
-    try_fill(page, [
-        "input[placeholder*='hour' i]",
-        "input[name*='hour' i]",
-        "input[id*='hour' i]",
-        "[class*='reg-hours'] input",
-        "input[type='number']",
-    ], "9", "regularization hours")
+    for sel in ["input[placeholder*='hour' i]", "input[name*='hour' i]",
+                "[class*='hour'] input", "input[type='number']"]:
+        try:
+            el = page.locator(sel).first
+            if el.is_visible(timeout=3_000):
+                el.triple_click()
+                el.fill("9")
+                print("  ✓ Filled 9hr")
+                break
+        except Exception:
+            continue
 
-    try_select(page, [
-        "select[name*='reason' i]",
-        "select[id*='reason' i]",
-        "[class*='reason'] select",
-        "mat-select[placeholder*='reason' i]",
-        "[aria-label*='reason' i]",
-    ], "Work From Home", "reason")
+    for sel in ["select[name*='reason' i]", "select", "mat-select",
+                "[aria-label*='reason' i]", "[placeholder*='reason' i]"]:
+        try:
+            el = page.locator(sel).first
+            if el.is_visible(timeout=3_000):
+                tag = el.evaluate("e => e.tagName").upper()
+                if tag == "SELECT":
+                    el.select_option(label="Work From Home")
+                else:
+                    el.click()
+                    page.wait_for_timeout(500)
+                    page.locator("mat-option:has-text('Work From Home'), "
+                                 "li:has-text('Work From Home'), "
+                                 "option:has-text('Work From Home')").first.click()
+                print("  ✓ Selected Work From Home")
+                break
+        except Exception:
+            continue
 
-    try_fill(page, [
-        "textarea[placeholder*='comment' i]",
-        "textarea[name*='comment' i]",
-        "input[placeholder*='comment' i]",
-        "input[name*='remark' i]",
-        "textarea",
-    ], "wfh", "comment")
+    for sel in ["textarea", "input[placeholder*='comment' i]",
+                "input[name*='remark' i]", "input[placeholder*='remark' i]"]:
+        try:
+            el = page.locator(sel).first
+            if el.is_visible(timeout=3_000):
+                el.triple_click()
+                el.fill("wfh")
+                print("  ✓ Filled comment: wfh")
+                break
+        except Exception:
+            continue
 
-    shot(page, "06_regularization_filled")
-    save(page, "regularization")
-    shot(page, "07_regularization_saved")
+    shot(page, "06_regularize_filled")
+
+    page.locator("button:has-text('Save')").first.click()
+    page.wait_for_timeout(2_000)
+    dismiss_popup(page)
+    shot(page, "07_regularize_saved")
     print("  Regularization saved.")
 
 
@@ -288,7 +260,6 @@ def main():
     print("=" * 55)
 
     decoded = base64.b64decode(SESSION_B64.encode())
-    # Support both compressed (gzip) and plain JSON sessions
     try:
         session_json = gzip.decompress(decoded)
     except OSError:
