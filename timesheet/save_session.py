@@ -15,11 +15,13 @@ Steps:
 """
 
 import base64
+import gzip
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 BASE_URL     = "https://itime.ltimindtree.com/#/Timesheet"
 SESSION_FILE = Path("timesheet/auth_state.json")
+SESSION_TXT  = Path("timesheet/session.txt")
 
 
 def main():
@@ -41,17 +43,25 @@ def main():
         ctx.storage_state(path=str(SESSION_FILE))
         browser.close()
 
-    encoded = base64.b64encode(SESSION_FILE.read_bytes()).decode()
+    # Compress then base64-encode (reduces size by ~75%)
+    raw       = SESSION_FILE.read_bytes()
+    compressed = gzip.compress(raw, compresslevel=9)
+    encoded   = base64.b64encode(compressed).decode()
 
-    print("\n✓ Session saved to", SESSION_FILE)
+    SESSION_TXT.write_text(encoded, encoding="utf-8")
+
+    original_kb   = len(raw) / 1024
+    compressed_kb = len(encoded) / 1024
+    print(f"\n✓ Session saved to {SESSION_FILE}")
+    print(f"  Original size : {original_kb:.1f} KB")
+    print(f"  Encoded size  : {compressed_kb:.1f} KB  (compressed + base64)")
+    print(f"✓ Encoded value written to {SESSION_TXT}")
     print("\n" + "=" * 60)
     print("NEXT STEP — add this as GitHub secret: ITIME_SESSION")
     print("=" * 60)
-    print("\nCopy the entire value below:\n")
-    print(encoded)
-    print("\n" + "=" * 60)
-    print("Go to: https://github.com/AbhijitGunjewar1/ltm/settings/secrets/actions")
-    print("Create secret  ITIME_SESSION  and paste the value above.")
+    print(f"\nOpen  {SESSION_TXT}  and copy the entire contents.")
+    print("\nThen go to: https://github.com/AbhijitGunjewar1/ltm/settings/secrets/actions")
+    print("Create secret  ITIME_SESSION  and paste the value.")
 
 
 if __name__ == "__main__":

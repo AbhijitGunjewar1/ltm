@@ -22,6 +22,7 @@ Optional env vars:
 """
 
 import base64
+import gzip
 import os
 import sys
 import tempfile
@@ -271,7 +272,12 @@ def main():
     print(f"iTime Timesheet — {TARGET_DATE} ({DAY_NAMES[TARGET_DATE.weekday()]})")
     print("=" * 55)
 
-    session_json = base64.b64decode(SESSION_B64.encode())
+    decoded = base64.b64decode(SESSION_B64.encode())
+    # Support both compressed (gzip) and plain JSON sessions
+    try:
+        session_json = gzip.decompress(decoded)
+    except OSError:
+        session_json = decoded
     with tempfile.NamedTemporaryFile(suffix=".json", delete=False, mode="wb") as f:
         f.write(session_json)
         session_path = f.name
