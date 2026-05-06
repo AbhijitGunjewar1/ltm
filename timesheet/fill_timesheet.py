@@ -4,7 +4,7 @@ iTime Timesheet Automation
 
 Steps executed (for TARGET_DATE, default = yesterday):
   1. Navigate to iTime Timesheet page and take screenshot
-  2. Identify yesterday's date column
+  2. Identify yesterday's date column by header text
   3. Fill 8 hours for the project entry
   4. Fill 1 hour for the non-project entry
   5. Save the timesheet
@@ -56,14 +56,13 @@ TIMEOUT       = 30_000
 DAY_NAMES     = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
 
-# ── Screenshot helper ─────────────────────────────────────────────────────────
+# ── Helpers ───────────────────────────────────────────────────────────────────
 def shot(page, step: str):
     path = SCREENSHOTS_DIR / f"{step}.png"
     page.screenshot(path=str(path), full_page=True)
     print(f"  [screenshot] {path}")
 
 
-# ── Wait for app to load ──────────────────────────────────────────────────────
 def wait_for_app(page):
     print("  Waiting for app to load...")
     try:
@@ -73,7 +72,6 @@ def wait_for_app(page):
     page.wait_for_timeout(3_000)
 
 
-# ── Dismiss any popup/dialog ──────────────────────────────────────────────────
 def dismiss_popup(page):
     for sel in ["button:has-text('Ok')", "button:has-text('OK')", "button:has-text('Close')"]:
         try:
@@ -87,7 +85,6 @@ def dismiss_popup(page):
             continue
 
 
-# ── Session check ─────────────────────────────────────────────────────────────
 def assert_logged_in(page):
     try:
         page.wait_for_selector("input[type='email'], input[name='loginfmt']", timeout=5_000)
@@ -100,29 +97,73 @@ def assert_logged_in(page):
         pass
 
 
-# ── Column index for target date (grid is Sunday-first) ───────────────────────
-def day_column() -> int:
-    # Grid columns: Sun=2, Mon=3, Tue=4, Wed=5, Thu=6, Fri=7, Sat=8
-    # Python weekday(): Mon=0 … Sun=6
-    return (TARGET_DATE.weekday() + 1) % 7 + 2
+# ── Type into a focused input (Angular-compatible) ────────────────────────────
+def type_value(page, x: float, y: float, value: str, label: str):
+    page.mouse.click(x, y, click_count=3)   # triple-click selects all
+    page.wait_for_timeout(300)
+    page.keyboard.type(value)
+    page.keyboard.press("Tab")
+    page.wait_for_timeout(500)
+    print(f"  ✓ Typed {value}hr → {label}")
 
 
-# ── Fill a specific input cell by row index and column ───────────────────────
-def fill_cell(page, row_nth: int, col: int, value: str, label: str) -> bool:
-    try:
-        row = page.locator("tr:has(input)").nth(row_nth)
-        cell = row.locator(f"td:nth-child({col})").first
-        inp  = cell.locator("input").first
-        if inp.is_visible(timeout=5_000):
-            inp.triple_click()
-            inp.fill(value)
-            inp.press("Tab")
-            page.wait_for_timeout(500)
-            print(f"  ✓ Filled {value}hr → {label}")
-            return True
-    except Exception as e:
-        print(f"  ✗ Could not fill {label}: {e}")
-    return False
+# ── Find inputs in target date column by screen coordinates ───────────────────
+def find_column_inputs(page) -> list[dict]:
+    """
+    Uses JS to find the x-centre of the target date header,
+    then returns all visible inputs within that column (sorted top→bottom).
+    """
+    day_num  = TARGET_DATE.day        # e.g. 5
+    day_abbr = DAY_NAMES[TARGET_DATE.weekday()]  # e.g. "Tue"
+
+    result = page.evaluate("""
+    ([dayNum, dayAbbr]) => {
+        // Find the header cell for the target date
+        // iTime renders headers like "Tue 05" inside a td/th
+        let targetX = -1;
+        const allEls = Array.from(document.querySelectorAll('td, th, span, div'));
+        for (const el of allEls) {
+            const text = el.innerText ? el.innerText.trim() : el.textContent.trim();
+            const padded = String(dayNum).padStart(2, '0');
+            if ((text === padded || text === String(dayNum) ||
+                 text.includes(dayAbbr + ' ' + padded) ||
+                 text.includes(dayAbbr + ' ' + dayNum)) &&
+                text.length < 15) {
+                const rect = el.getBoundingClientRect();
+                if (rect.width > 10 && rect.height > 5) {
+                    targetX = rect.left + rect.width / 2;
+                    break;
+                }
+            }
+        }
+
+        if (targetX < 0) return { error: 'column header not found', dayNum, dayAbbr };
+
+        // Collect all enabled, visible inputs near targetX
+        const inputs = Array.from(document.querySelectorAll('input'))
+            .filter(inp => {
+                if (inp.disabled || inp.readOnly || !inp.offsetParent) return false;
+                const rect = inp.getBoundingClientRect();
+                if (rect.width < 5 || rect.height < 5) return false;
+                const cx = rect.left + rect.width / 2;
+                return Math.abs(cx - targetX) < 55;
+            })
+            .sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)
+            .map(inp => {
+                const r = inp.getBoundingClientRect();
+                return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+            });
+
+        return { targetX, inputs };
+    }
+    """, [day_num, day_abbr])
+
+    if "error" in result:
+        print(f"  ✗ JS column search: {result}")
+        return []
+
+    print(f"  Column x={result['targetX']:.0f}, found {len(result['inputs'])} input(s)")
+    return result["inputs"]
 
 
 # ── Step 1: Navigate ──────────────────────────────────────────────────────────
@@ -154,12 +195,22 @@ def step_navigate(page):
 
 # ── Step 2 & 3: Fill hours ────────────────────────────────────────────────────
 def step_fill_timesheet(page):
-    col = day_column()
-    print(f"\nStep 3 — Fill 8 hours (project) at column {col}")
-    fill_cell(page, 0, col, "8", "project row")
+    print(f"\nStep 3 — Locate column for {TARGET_DATE.strftime('%a %d')}")
+    inputs = find_column_inputs(page)
 
-    print(f"\nStep 4 — Fill 1 hour (non-project) at column {col}")
-    fill_cell(page, -1, col, "1", "non-project row")
+    if not inputs:
+        print("  ✗ No inputs found — taking debug screenshot")
+        shot(page, "03_debug_no_inputs")
+        raise RuntimeError("Could not locate input cells for target date column.")
+
+    print(f"\nStep 3 — Fill 8 hours (project, row 0)")
+    type_value(page, inputs[0]["x"], inputs[0]["y"], "8", "project")
+
+    if len(inputs) > 1:
+        print(f"\nStep 4 — Fill 1 hour (non-project, row {len(inputs)-1})")
+        type_value(page, inputs[-1]["x"], inputs[-1]["y"], "1", "non-project")
+    else:
+        print("  ✗ Only 1 input found — non-project row not filled")
 
     shot(page, "03_hours_filled")
 
@@ -172,35 +223,28 @@ def step_fill_timesheet(page):
 
 # ── Step 4: Regularize ────────────────────────────────────────────────────────
 def step_regularize(page):
-    print(f"\nStep 6 — Open Regularize")
+    print(f"\nStep 6 — Click Regularize button")
 
-    # The Regularize button is in the Attendance section header on the same page
     clicked = False
-    for sel in [
-        "button:has-text('Regularize')",
-        "a:has-text('Regularize')",
-        "span:has-text('Regularize')",
-        "[class*='regularize' i]",
-        "button:has-text('Regulariz')",
-    ]:
+    for sel in ["button:has-text('Regularize')", "a:has-text('Regularize')",
+                "span:has-text('Regularize')", "button:has-text('Regulariz')"]:
         try:
             btn = page.locator(sel).first
             if btn.is_visible(timeout=3_000):
                 btn.click()
                 page.wait_for_timeout(2_000)
                 clicked = True
-                print("  ✓ Clicked Regularize button")
+                print("  ✓ Clicked Regularize")
                 break
         except Exception:
             continue
 
     if not clicked:
-        print("  ✗ Could not find Regularize button")
+        print("  ✗ Regularize button not found")
 
     shot(page, "05_regularize_open")
 
-    # Fill hours, reason, comment in the regularization form/modal
-    print("  Filling 9 hours WFH...")
+    # Fill hours
     for sel in ["input[placeholder*='hour' i]", "input[name*='hour' i]",
                 "[class*='hour'] input", "input[type='number']"]:
         try:
@@ -213,8 +257,8 @@ def step_regularize(page):
         except Exception:
             continue
 
-    for sel in ["select[name*='reason' i]", "select", "mat-select",
-                "[aria-label*='reason' i]", "[placeholder*='reason' i]"]:
+    # Select reason
+    for sel in ["select", "mat-select", "[aria-label*='reason' i]", "[placeholder*='reason' i]"]:
         try:
             el = page.locator(sel).first
             if el.is_visible(timeout=3_000):
@@ -225,15 +269,14 @@ def step_regularize(page):
                     el.click()
                     page.wait_for_timeout(500)
                     page.locator("mat-option:has-text('Work From Home'), "
-                                 "li:has-text('Work From Home'), "
-                                 "option:has-text('Work From Home')").first.click()
+                                 "li:has-text('Work From Home')").first.click()
                 print("  ✓ Selected Work From Home")
                 break
         except Exception:
             continue
 
-    for sel in ["textarea", "input[placeholder*='comment' i]",
-                "input[name*='remark' i]", "input[placeholder*='remark' i]"]:
+    # Fill comment
+    for sel in ["textarea", "input[placeholder*='comment' i]", "input[name*='remark' i]"]:
         try:
             el = page.locator(sel).first
             if el.is_visible(timeout=3_000):
@@ -245,7 +288,6 @@ def step_regularize(page):
             continue
 
     shot(page, "06_regularize_filled")
-
     page.locator("button:has-text('Save')").first.click()
     page.wait_for_timeout(2_000)
     dismiss_popup(page)
