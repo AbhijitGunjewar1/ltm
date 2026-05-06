@@ -223,8 +223,35 @@ def step_fill_timesheet(page):
 
 # ── Step 4: Regularize ────────────────────────────────────────────────────────
 def step_regularize(page):
-    print(f"\nStep 6 — Click Regularize button")
+    print(f"\nStep 6 — Select target date in week header")
 
+    day_num  = TARGET_DATE.day
+    day_abbr = DAY_NAMES[TARGET_DATE.weekday()]
+
+    # Click the target date cell in the attendance/week header row
+    date_clicked = False
+    for sel in [
+        f"td:has-text('{day_abbr} {day_num:02d}')",
+        f"th:has-text('{day_abbr} {day_num:02d}')",
+        f"td:has-text('{day_abbr} {day_num}')",
+        f"[class*='date']:has-text('{day_num:02d}')",
+        f"[class*='day']:has-text('{day_num:02d}')",
+    ]:
+        try:
+            el = page.locator(sel).first
+            if el.is_visible(timeout=2_000):
+                el.click()
+                page.wait_for_timeout(1_500)
+                date_clicked = True
+                print(f"  ✓ Clicked date: {day_abbr} {day_num:02d}")
+                break
+        except Exception:
+            continue
+
+    if not date_clicked:
+        print(f"  ✗ Could not click date cell — proceeding anyway")
+
+    print(f"  Clicking Regularize button...")
     clicked = False
     for sel in ["button:has-text('Regularize')", "a:has-text('Regularize')",
                 "span:has-text('Regularize')", "button:has-text('Regulariz')"]:
